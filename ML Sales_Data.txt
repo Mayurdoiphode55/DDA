@@ -1,0 +1,684 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans, AgglomerativeClustering
+from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
+from scipy.cluster.hierarchy import dendrogram, linkage
+from scipy.spatial.distance import cdist
+import warnings
+warnings.filterwarnings('ignore')
+
+# Set visualization style
+sns.set_style('whitegrid')
+plt.rcParams['figure.figsize'] = (12, 6)
+
+print("=" * 80)
+print("SALES DATA CLUSTERING ANALYSIS")
+print("K-Means & Hierarchical Clustering")
+print("=" * 80)
+
+# ============================================================================
+# 1. LOAD AND EXPLORE DATASET
+# ============================================================================
+print("\n[STEP 1] Loading and Exploring Dataset...")
+print("=" * 80)
+
+# Load dataset
+df = pd.read_csv('sales_data_sample.csv', encoding='latin1')
+
+print(f"\nDataset Shape: {df.shape}")
+print(f"Number of Records: {df.shape[0]}")
+print(f"Number of Features: {df.shape[1]}")
+
+print("\nFirst 5 rows:")
+print(df.head())
+
+print("\nColumn Names:")
+for i, col in enumerate(df.columns, 1):
+    print(f"{i:2d}. {col}")
+
+print("\nDataset Info:")
+print(df.info())
+
+print("\nMissing Values:")
+missing = df.isnull().sum()
+if missing.sum() > 0:
+    print(missing[missing > 0])
+else:
+    print("No missing values found!")
+
+print("\nBasic Statistics:")
+print(df.describe())
+
+# ============================================================================
+# 2. DATA PREPROCESSING
+# ============================================================================
+print("\n" + "=" * 80)
+print("[STEP 2] Data Preprocessing...")
+print("=" * 80)
+
+# Select numerical features for clustering
+numerical_features = ['QUANTITYORDERED', 'PRICEEACH', 'SALES', 'MSRP']
+
+# Check if features exist
+available_features = [col for col in numerical_features if col in df.columns]
+print(f"\nAvailable numerical features for clustering: {available_features}")
+
+# Create clustering dataset
+df_cluster = df[available_features].copy()
+
+# Remove any rows with missing values
+df_cluster = df_cluster.dropna()
+print(f"\nRows after removing missing values: {len(df_cluster)}")
+
+# Display statistics of selected features
+print("\nStatistics of Selected Features:")
+print(df_cluster.describe())
+
+# Visualize feature distributions
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+axes = axes.ravel()
+
+for idx, col in enumerate(available_features):
+    axes[idx].hist(df_cluster[col], bins=30, color='steelblue', edgecolor='black', alpha=0.7)
+    axes[idx].set_title(f'{col} Distribution', fontsize=12, fontweight='bold')
+    axes[idx].set_xlabel(col)
+    axes[idx].set_ylabel('Frequency')
+    axes[idx].grid(alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+# Correlation Analysis
+print("\n" + "=" * 80)
+print("Correlation Analysis")
+print("=" * 80)
+
+correlation_matrix = df_cluster.corr()
+print("\nCorrelation Matrix:")
+print(correlation_matrix)
+
+plt.figure(figsize=(10, 8))
+sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', center=0, 
+            fmt='.2f', square=True, linewidths=2, cbar_kws={'label': 'Correlation'})
+plt.title('Feature Correlation Heatmap', fontsize=16, fontweight='bold', pad=20)
+plt.tight_layout()
+plt.show()
+
+# ============================================================================
+# 3. FEATURE SCALING
+# ============================================================================
+print("\n" + "=" * 80)
+print("[STEP 3] Feature Scaling...")
+print("=" * 80)
+
+# Standardize features (important for distance-based clustering)
+scaler = StandardScaler()
+df_scaled = scaler.fit_transform(df_cluster)
+
+print("\nStandardization applied using StandardScaler")
+print("All features now have mean=0 and std=1")
+
+print("\nBefore Scaling:")
+print(f"  Mean: {df_cluster.mean().mean():.2f}")
+print(f"  Std Dev: {df_cluster.std().mean():.2f}")
+
+print("\nAfter Scaling:")
+print(f"  Mean: {df_scaled.mean():.6f}")
+print(f"  Std Dev: {df_scaled.std():.2f}")
+
+# Visualize scaling effect
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Before scaling
+axes[0].hist(df_cluster['CreditScore'] if 'CreditScore' in df_cluster.columns else df_cluster.iloc[:, 0], 
+             bins=30, alpha=0.7, color='blue', label=df_cluster.columns[0])
+axes[0].hist(df_cluster.iloc[:, 1], bins=30, alpha=0.7, color='green', label=df_cluster.columns[1])
+axes[0].hist(df_cluster.iloc[:, 2], bins=30, alpha=0.7, color='red', label=df_cluster.columns[2])
+axes[0].set_title('Feature Distribution - Before Scaling', fontsize=12, fontweight='bold')
+axes[0].set_xlabel('Value')
+axes[0].set_ylabel('Frequency')
+axes[0].legend()
+
+# After scaling
+axes[1].hist(df_scaled[:, 0], bins=30, alpha=0.7, color='blue', label=f'{df_cluster.columns[0]} (scaled)')
+axes[1].hist(df_scaled[:, 1], bins=30, alpha=0.7, color='green', label=f'{df_cluster.columns[1]} (scaled)')
+axes[1].hist(df_scaled[:, 2], bins=30, alpha=0.7, color='red', label=f'{df_cluster.columns[2]} (scaled)')
+axes[1].set_title('Feature Distribution - After Scaling', fontsize=12, fontweight='bold')
+axes[1].set_xlabel('Standardized Value')
+axes[1].set_ylabel('Frequency')
+axes[1].legend()
+
+plt.tight_layout()
+plt.show()
+
+# ============================================================================
+# 4. ELBOW METHOD FOR OPTIMAL K
+# ============================================================================
+print("\n" + "=" * 80)
+print("[STEP 4] Determining Optimal Number of Clusters - Elbow Method")
+print("=" * 80)
+
+# Calculate WCSS (Within-Cluster Sum of Squares) for different K values
+K_range = range(2, 11)
+wcss = []
+silhouette_scores = []
+davies_bouldin_scores = []
+calinski_harabasz_scores = []
+
+print("\nCalculating metrics for K = 2 to 10...")
+for k in K_range:
+    kmeans = KMeans(n_clusters=k, init='k-means++', random_state=42, n_init=10)
+    kmeans.fit(df_scaled)
+    
+    wcss.append(kmeans.inertia_)
+    
+    # Calculate clustering quality metrics
+    silhouette = silhouette_score(df_scaled, kmeans.labels_)
+    davies_bouldin = davies_bouldin_score(df_scaled, kmeans.labels_)
+    calinski_harabasz = calinski_harabasz_score(df_scaled, kmeans.labels_)
+    
+    silhouette_scores.append(silhouette)
+    davies_bouldin_scores.append(davies_bouldin)
+    calinski_harabasz_scores.append(calinski_harabasz)
+    
+    print(f"K={k}: WCSS={kmeans.inertia_:.2f}, Silhouette={silhouette:.3f}, "
+          f"Davies-Bouldin={davies_bouldin:.3f}, Calinski-Harabasz={calinski_harabasz:.2f}")
+
+# Calculate elbow point using the elbow method
+differences = np.diff(wcss)
+second_differences = np.diff(differences)
+elbow_point = np.argmin(second_differences) + 2
+
+print(f"\n🎯 Optimal number of clusters (Elbow Method): {elbow_point}")
+print(f"🎯 Optimal number of clusters (Silhouette Score): {K_range[np.argmax(silhouette_scores)]}")
+
+# Visualize Elbow Method and Quality Metrics
+fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+
+# Elbow curve
+axes[0, 0].plot(K_range, wcss, 'bo-', linewidth=2, markersize=8)
+axes[0, 0].axvline(x=elbow_point, color='red', linestyle='--', linewidth=2, 
+                   label=f'Elbow at K={elbow_point}')
+axes[0, 0].set_xlabel('Number of Clusters (K)', fontsize=12)
+axes[0, 0].set_ylabel('WCSS (Within-Cluster Sum of Squares)', fontsize=12)
+axes[0, 0].set_title('Elbow Method', fontsize=14, fontweight='bold')
+axes[0, 0].legend()
+axes[0, 0].grid(alpha=0.3)
+
+# Silhouette Score (higher is better)
+axes[0, 1].plot(K_range, silhouette_scores, 'go-', linewidth=2, markersize=8)
+axes[0, 1].axvline(x=K_range[np.argmax(silhouette_scores)], color='red', 
+                   linestyle='--', linewidth=2, 
+                   label=f'Best K={K_range[np.argmax(silhouette_scores)]}')
+axes[0, 1].set_xlabel('Number of Clusters (K)', fontsize=12)
+axes[0, 1].set_ylabel('Silhouette Score', fontsize=12)
+axes[0, 1].set_title('Silhouette Score (Higher is Better)', fontsize=14, fontweight='bold')
+axes[0, 1].legend()
+axes[0, 1].grid(alpha=0.3)
+
+# Davies-Bouldin Index (lower is better)
+axes[1, 0].plot(K_range, davies_bouldin_scores, 'ro-', linewidth=2, markersize=8)
+axes[1, 0].axvline(x=K_range[np.argmin(davies_bouldin_scores)], color='green', 
+                   linestyle='--', linewidth=2,
+                   label=f'Best K={K_range[np.argmin(davies_bouldin_scores)]}')
+axes[1, 0].set_xlabel('Number of Clusters (K)', fontsize=12)
+axes[1, 0].set_ylabel('Davies-Bouldin Index', fontsize=12)
+axes[1, 0].set_title('Davies-Bouldin Index (Lower is Better)', fontsize=14, fontweight='bold')
+axes[1, 0].legend()
+axes[1, 0].grid(alpha=0.3)
+
+# Calinski-Harabasz Index (higher is better)
+axes[1, 1].plot(K_range, calinski_harabasz_scores, 'mo-', linewidth=2, markersize=8)
+axes[1, 1].axvline(x=K_range[np.argmax(calinski_harabasz_scores)], color='red', 
+                   linestyle='--', linewidth=2,
+                   label=f'Best K={K_range[np.argmax(calinski_harabasz_scores)]}')
+axes[1, 1].set_xlabel('Number of Clusters (K)', fontsize=12)
+axes[1, 1].set_ylabel('Calinski-Harabasz Score', fontsize=12)
+axes[1, 1].set_title('Calinski-Harabasz Index (Higher is Better)', fontsize=14, fontweight='bold')
+axes[1, 1].legend()
+axes[1, 1].grid(alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+# ============================================================================
+# 5. K-MEANS CLUSTERING
+# ============================================================================
+print("\n" + "=" * 80)
+print("[STEP 5] K-Means Clustering Implementation")
+print("=" * 80)
+
+# Use the optimal K from elbow method
+optimal_k = elbow_point
+
+print(f"\nApplying K-Means with K = {optimal_k} clusters...")
+
+# Apply K-Means clustering
+kmeans_final = KMeans(n_clusters=optimal_k, init='k-means++', 
+                      random_state=42, n_init=10, max_iter=300)
+kmeans_labels = kmeans_final.fit_predict(df_scaled)
+
+# Add cluster labels to original dataframe
+df_cluster['KMeans_Cluster'] = kmeans_labels
+
+# Calculate final metrics
+final_silhouette = silhouette_score(df_scaled, kmeans_labels)
+final_davies_bouldin = davies_bouldin_score(df_scaled, kmeans_labels)
+final_calinski_harabasz = calinski_harabasz_score(df_scaled, kmeans_labels)
+
+print(f"\n--- K-Means Clustering Results (K={optimal_k}) ---")
+print(f"Silhouette Score: {final_silhouette:.4f}")
+print(f"Davies-Bouldin Index: {final_davies_bouldin:.4f}")
+print(f"Calinski-Harabasz Score: {final_calinski_harabasz:.2f}")
+print(f"Inertia (WCSS): {kmeans_final.inertia_:.2f}")
+
+# Cluster distribution
+print("\nCluster Distribution:")
+cluster_counts = pd.Series(kmeans_labels).value_counts().sort_index()
+for cluster_id, count in cluster_counts.items():
+    percentage = (count / len(kmeans_labels)) * 100
+    print(f"  Cluster {cluster_id}: {count} samples ({percentage:.2f}%)")
+
+# Cluster characteristics
+print("\n--- Cluster Characteristics (K-Means) ---")
+cluster_profile = df_cluster.groupby('KMeans_Cluster')[available_features].mean()
+print("\nMean values per cluster:")
+print(cluster_profile)
+
+# Visualize K-Means clusters
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+# Plot 1: First two features
+feature_x, feature_y = available_features[0], available_features[1]
+scatter1 = axes[0].scatter(df_cluster[feature_x], df_cluster[feature_y], 
+                           c=kmeans_labels, cmap='viridis', alpha=0.6, s=50)
+axes[0].scatter(kmeans_final.cluster_centers_[:, 0] * scaler.scale_[0] + scaler.mean_[0],
+                kmeans_final.cluster_centers_[:, 1] * scaler.scale_[1] + scaler.mean_[1],
+                c='red', marker='X', s=300, edgecolors='black', linewidths=2,
+                label='Centroids')
+axes[0].set_xlabel(feature_x, fontsize=12)
+axes[0].set_ylabel(feature_y, fontsize=12)
+axes[0].set_title(f'K-Means Clustering\n({feature_x} vs {feature_y})', 
+                  fontsize=14, fontweight='bold')
+axes[0].legend()
+axes[0].grid(alpha=0.3)
+
+# Plot 2: Different feature pair
+if len(available_features) >= 3:
+    feature_x2, feature_y2 = available_features[2], available_features[1]
+    scatter2 = axes[1].scatter(df_cluster[feature_x2], df_cluster[feature_y2],
+                               c=kmeans_labels, cmap='viridis', alpha=0.6, s=50)
+    axes[1].scatter(kmeans_final.cluster_centers_[:, 2] * scaler.scale_[2] + scaler.mean_[2],
+                    kmeans_final.cluster_centers_[:, 1] * scaler.scale_[1] + scaler.mean_[1],
+                    c='red', marker='X', s=300, edgecolors='black', linewidths=2,
+                    label='Centroids')
+    axes[1].set_xlabel(feature_x2, fontsize=12)
+    axes[1].set_ylabel(feature_y2, fontsize=12)
+    axes[1].set_title(f'K-Means Clustering\n({feature_x2} vs {feature_y2})',
+                      fontsize=14, fontweight='bold')
+    axes[1].legend()
+    axes[1].grid(alpha=0.3)
+
+plt.colorbar(scatter1, ax=axes[0], label='Cluster')
+plt.tight_layout()
+plt.show()
+
+# Cluster profile heatmap
+plt.figure(figsize=(10, 6))
+sns.heatmap(cluster_profile.T, annot=True, cmap='YlOrRd', fmt='.2f', 
+            linewidths=1, cbar_kws={'label': 'Average Value'})
+plt.title('K-Means Cluster Profiles (Average Feature Values)', 
+          fontsize=14, fontweight='bold', pad=20)
+plt.xlabel('Cluster ID', fontsize=12)
+plt.ylabel('Features', fontsize=12)
+plt.tight_layout()
+plt.show()
+
+# ============================================================================
+# 6. HIERARCHICAL CLUSTERING
+# ============================================================================
+print("\n" + "=" * 80)
+print("[STEP 6] Hierarchical Clustering Implementation")
+print("=" * 80)
+
+# Create dendrogram to visualize hierarchy
+print("\nGenerating dendrogram...")
+
+# Use a sample for dendrogram if dataset is large
+sample_size = min(500, len(df_scaled))
+sample_indices = np.random.choice(len(df_scaled), sample_size, replace=False)
+df_sample = df_scaled[sample_indices]
+
+# Calculate linkage matrix using Ward's method
+linkage_matrix = linkage(df_sample, method='ward')
+
+# Plot dendrogram
+plt.figure(figsize=(16, 8))
+dendrogram(linkage_matrix,
+           truncate_mode='lastp',
+           p=30,
+           leaf_rotation=90,
+           leaf_font_size=10,
+           show_contracted=True)
+plt.title('Hierarchical Clustering Dendrogram (Ward Method)', 
+          fontsize=16, fontweight='bold', pad=20)
+plt.xlabel('Sample Index or (Cluster Size)', fontsize=12)
+plt.ylabel('Distance', fontsize=12)
+plt.axhline(y=50, color='r', linestyle='--', linewidth=2, 
+            label='Cut Line (for cluster determination)')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Apply hierarchical clustering with optimal K
+print(f"\nApplying Hierarchical Clustering with K = {optimal_k} clusters...")
+
+hierarchical = AgglomerativeClustering(n_clusters=optimal_k, linkage='ward')
+hierarchical_labels = hierarchical.fit_predict(df_scaled)
+
+# Add cluster labels to dataframe
+df_cluster['Hierarchical_Cluster'] = hierarchical_labels
+
+# Calculate metrics
+hier_silhouette = silhouette_score(df_scaled, hierarchical_labels)
+hier_davies_bouldin = davies_bouldin_score(df_scaled, hierarchical_labels)
+hier_calinski_harabasz = calinski_harabasz_score(df_scaled, hierarchical_labels)
+
+print(f"\n--- Hierarchical Clustering Results (K={optimal_k}) ---")
+print(f"Silhouette Score: {hier_silhouette:.4f}")
+print(f"Davies-Bouldin Index: {hier_davies_bouldin:.4f}")
+print(f"Calinski-Harabasz Score: {hier_calinski_harabasz:.2f}")
+
+# Cluster distribution
+print("\nCluster Distribution:")
+hier_cluster_counts = pd.Series(hierarchical_labels).value_counts().sort_index()
+for cluster_id, count in hier_cluster_counts.items():
+    percentage = (count / len(hierarchical_labels)) * 100
+    print(f"  Cluster {cluster_id}: {count} samples ({percentage:.2f}%)")
+
+# Cluster characteristics
+print("\n--- Cluster Characteristics (Hierarchical) ---")
+hier_cluster_profile = df_cluster.groupby('Hierarchical_Cluster')[available_features].mean()
+print("\nMean values per cluster:")
+print(hier_cluster_profile)
+
+# Visualize Hierarchical clusters
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+# Plot 1: First two features
+scatter1 = axes[0].scatter(df_cluster[available_features[0]], 
+                           df_cluster[available_features[1]],
+                           c=hierarchical_labels, cmap='plasma', alpha=0.6, s=50)
+axes[0].set_xlabel(available_features[0], fontsize=12)
+axes[0].set_ylabel(available_features[1], fontsize=12)
+axes[0].set_title(f'Hierarchical Clustering\n({available_features[0]} vs {available_features[1]})',
+                  fontsize=14, fontweight='bold')
+axes[0].grid(alpha=0.3)
+
+# Plot 2: Different feature pair
+if len(available_features) >= 3:
+    scatter2 = axes[1].scatter(df_cluster[available_features[2]], 
+                               df_cluster[available_features[1]],
+                               c=hierarchical_labels, cmap='plasma', alpha=0.6, s=50)
+    axes[1].set_xlabel(available_features[2], fontsize=12)
+    axes[1].set_ylabel(available_features[1], fontsize=12)
+    axes[1].set_title(f'Hierarchical Clustering\n({available_features[2]} vs {available_features[1]})',
+                      fontsize=14, fontweight='bold')
+    axes[1].grid(alpha=0.3)
+
+plt.colorbar(scatter1, ax=axes[0], label='Cluster')
+plt.tight_layout()
+plt.show()
+
+# Hierarchical cluster profile heatmap
+plt.figure(figsize=(10, 6))
+sns.heatmap(hier_cluster_profile.T, annot=True, cmap='RdYlGn', fmt='.2f',
+            linewidths=1, cbar_kws={'label': 'Average Value'})
+plt.title('Hierarchical Cluster Profiles (Average Feature Values)',
+          fontsize=14, fontweight='bold', pad=20)
+plt.xlabel('Cluster ID', fontsize=12)
+plt.ylabel('Features', fontsize=12)
+plt.tight_layout()
+plt.show()
+
+# ============================================================================
+# 7. COMPARISON OF CLUSTERING METHODS
+# ============================================================================
+print("\n" + "=" * 80)
+print("[STEP 7] Comparison of Clustering Methods")
+print("=" * 80)
+
+# Create comparison dataframe
+comparison_df = pd.DataFrame({
+    'Method': ['K-Means', 'Hierarchical'],
+    'Silhouette Score': [final_silhouette, hier_silhouette],
+    'Davies-Bouldin Index': [final_davies_bouldin, hier_davies_bouldin],
+    'Calinski-Harabasz Score': [final_calinski_harabasz, hier_calinski_harabasz]
+})
+
+print("\n" + comparison_df.to_string(index=False))
+
+# Visualize comparison
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+methods = ['K-Means', 'Hierarchical']
+x = np.arange(len(methods))
+width = 0.35
+
+# Silhouette Score
+silhouette_vals = [final_silhouette, hier_silhouette]
+bars1 = axes[0].bar(x, silhouette_vals, width, color=['steelblue', 'coral'])
+axes[0].set_ylabel('Silhouette Score', fontsize=12)
+axes[0].set_title('Silhouette Score\n(Higher is Better)', fontsize=12, fontweight='bold')
+axes[0].set_xticks(x)
+axes[0].set_xticklabels(methods)
+axes[0].grid(axis='y', alpha=0.3)
+for bar in bars1:
+    height = bar.get_height()
+    axes[0].text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.4f}', ha='center', va='bottom', fontsize=10)
+
+# Davies-Bouldin Index
+db_vals = [final_davies_bouldin, hier_davies_bouldin]
+bars2 = axes[1].bar(x, db_vals, width, color=['steelblue', 'coral'])
+axes[1].set_ylabel('Davies-Bouldin Index', fontsize=12)
+axes[1].set_title('Davies-Bouldin Index\n(Lower is Better)', fontsize=12, fontweight='bold')
+axes[1].set_xticks(x)
+axes[1].set_xticklabels(methods)
+axes[1].grid(axis='y', alpha=0.3)
+for bar in bars2:
+    height = bar.get_height()
+    axes[1].text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.4f}', ha='center', va='bottom', fontsize=10)
+
+# Calinski-Harabasz Score
+ch_vals = [final_calinski_harabasz, hier_calinski_harabasz]
+bars3 = axes[2].bar(x, ch_vals, width, color=['steelblue', 'coral'])
+axes[2].set_ylabel('Calinski-Harabasz Score', fontsize=12)
+axes[2].set_title('Calinski-Harabasz Score\n(Higher is Better)', fontsize=12, fontweight='bold')
+axes[2].set_xticks(x)
+axes[2].set_xticklabels(methods)
+axes[2].grid(axis='y', alpha=0.3)
+for bar in bars3:
+    height = bar.get_height()
+    axes[2].text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.2f}', ha='center', va='bottom', fontsize=10)
+
+plt.tight_layout()
+plt.show()
+
+# Side-by-side cluster visualization
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+# K-Means
+scatter1 = axes[0].scatter(df_cluster[available_features[0]], 
+                           df_cluster[available_features[1]],
+                           c=kmeans_labels, cmap='viridis', alpha=0.6, s=50)
+axes[0].set_xlabel(available_features[0], fontsize=12)
+axes[0].set_ylabel(available_features[1], fontsize=12)
+axes[0].set_title(f'K-Means Clustering (K={optimal_k})\nSilhouette: {final_silhouette:.4f}',
+                  fontsize=14, fontweight='bold')
+axes[0].grid(alpha=0.3)
+plt.colorbar(scatter1, ax=axes[0], label='Cluster')
+
+# Hierarchical
+scatter2 = axes[1].scatter(df_cluster[available_features[0]], 
+                           df_cluster[available_features[1]],
+                           c=hierarchical_labels, cmap='plasma', alpha=0.6, s=50)
+axes[1].set_xlabel(available_features[0], fontsize=12)
+axes[1].set_ylabel(available_features[1], fontsize=12)
+axes[1].set_title(f'Hierarchical Clustering (K={optimal_k})\nSilhouette: {hier_silhouette:.4f}',
+                  fontsize=14, fontweight='bold')
+axes[1].grid(alpha=0.3)
+plt.colorbar(scatter2, ax=axes[1], label='Cluster')
+
+plt.tight_layout()
+plt.show()
+
+# ============================================================================
+# 8. BUSINESS INSIGHTS AND CLUSTER INTERPRETATION
+# ============================================================================
+print("\n" + "=" * 80)
+print("[STEP 8] Business Insights & Cluster Interpretation")
+print("=" * 80)
+
+print("\n--- K-Means Cluster Insights ---")
+for cluster_id in range(optimal_k):
+    cluster_data = df_cluster[df_cluster['KMeans_Cluster'] == cluster_id][available_features]
+    print(f"\n🔹 Cluster {cluster_id} (n={len(cluster_data)}):")
+    
+    for feature in available_features:
+        avg_val = cluster_data[feature].mean()
+        print(f"   • Average {feature}: {avg_val:.2f}")
+    
+    # Interpretation
+    if 'SALES' in available_features:
+        avg_sales = cluster_data['SALES'].mean()
+        if avg_sales > df_cluster['SALES'].mean():
+            print(f"   💡 HIGH-VALUE customers (above average sales)")
+        else:
+            print(f"   💡 STANDARD customers (below average sales)")
+
+print("\n--- Hierarchical Cluster Insights ---")
+for cluster_id in range(optimal_k):
+    cluster_data = df_cluster[df_cluster['Hierarchical_Cluster'] == cluster_id][available_features]
+    print(f"\n🔹 Cluster {cluster_id} (n={len(cluster_data)}):")
+    
+    for feature in available_features:
+        avg_val = cluster_data[feature].mean()
+        print(f"   • Average {feature}: {avg_val:.2f}")
+
+# Cluster Size Distribution
+print("\n" + "=" * 80)
+print("ADDITIONAL INSIGHTS - Cluster Size Distribution")
+print("=" * 80)
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# K-Means cluster sizes
+kmeans_cluster_sizes = pd.Series(kmeans_labels).value_counts().sort_index()
+axes[0].bar(kmeans_cluster_sizes.index, kmeans_cluster_sizes.values, 
+            color='steelblue', edgecolor='black', alpha=0.7)
+axes[0].set_xlabel('Cluster ID', fontsize=12)
+axes[0].set_ylabel('Number of Samples', fontsize=12)
+axes[0].set_title(f'K-Means Cluster Sizes (K={optimal_k})', 
+                  fontsize=14, fontweight='bold')
+axes[0].grid(axis='y', alpha=0.3)
+for i, v in enumerate(kmeans_cluster_sizes.values):
+    axes[0].text(i, v + 10, str(v), ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+# Hierarchical cluster sizes
+hier_cluster_sizes = pd.Series(hierarchical_labels).value_counts().sort_index()
+axes[1].bar(hier_cluster_sizes.index, hier_cluster_sizes.values,
+            color='coral', edgecolor='black', alpha=0.7)
+axes[1].set_xlabel('Cluster ID', fontsize=12)
+axes[1].set_ylabel('Number of Samples', fontsize=12)
+axes[1].set_title(f'Hierarchical Cluster Sizes (K={optimal_k})',
+                  fontsize=14, fontweight='bold')
+axes[1].grid(axis='y', alpha=0.3)
+for i, v in enumerate(hier_cluster_sizes.values):
+    axes[1].text(i, v + 10, str(v), ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+plt.tight_layout()
+plt.show()
+
+# ============================================================================
+# 9. CONCLUSION
+# ============================================================================
+print("\n" + "=" * 80)
+print("CONCLUSION")
+print("=" * 80)
+
+# Determine better method
+if final_silhouette > hier_silhouette:
+    better_method = "K-Means"
+    better_score = final_silhouette
+else:
+    better_method = "Hierarchical"
+    better_score = hier_silhouette
+
+print(f"""
+✅ Clustering Analysis Complete!
+
+📊 Key Findings:
+   • Optimal number of clusters: {optimal_k} (determined by Elbow Method)
+   • Better performing method: {better_method} (Silhouette Score: {better_score:.4f})
+   • Total samples analyzed: {len(df_cluster)}
+   
+🎯 Clustering Quality Metrics:
+   K-Means:
+      - Silhouette Score: {final_silhouette:.4f}
+      - Davies-Bouldin Index: {final_davies_bouldin:.4f}
+      - Calinski-Harabasz Score: {final_calinski_harabasz:.2f}
+   
+   Hierarchical:
+      - Silhouette Score: {hier_silhouette:.4f}
+      - Davies-Bouldin Index: {hier_davies_bouldin:.4f}
+      - Calinski-Harabasz Score: {hier_calinski_harabasz:.2f}
+
+💡 Business Recommendations:
+   • Use these clusters for customer segmentation strategies
+   • Tailor marketing campaigns to each cluster's characteristics
+   • Focus on high-value clusters for retention programs
+   • Design specific products/offers for different segments
+   
+📈 Cluster Interpretations:
+""")
+
+# Print cluster summaries
+for cluster_id in range(optimal_k):
+    cluster_data = df_cluster[df_cluster['KMeans_Cluster'] == cluster_id]
+    print(f"\n   Cluster {cluster_id}:")
+    print(f"      Size: {len(cluster_data)} customers ({len(cluster_data)/len(df_cluster)*100:.1f}%)")
+    if 'SALES' in available_features:
+        avg_sales = cluster_data['SALES'].mean()
+        print(f"      Avg Sales: ${avg_sales:.2f}")
+    if 'QUANTITYORDERED' in available_features:
+        avg_qty = cluster_data['QUANTITYORDERED'].mean()
+        print(f"      Avg Quantity: {avg_qty:.1f} units")
+
+print(f"""
+🚀 Next Steps:
+   1. Validate clusters with business domain experts
+   2. Develop targeted strategies for each customer segment
+   3. Monitor cluster stability over time
+   4. Consider additional features for refinement
+   5. Implement A/B testing on different cluster strategies
+
+📊 All visualizations have been displayed!
+   • Feature distributions
+   • Correlation heatmap
+   • Elbow method analysis (4 metrics)
+   • K-Means cluster visualizations
+   • Hierarchical clustering dendrogram
+   • Cluster profile heatmaps
+   • Method comparison charts
+   • Cluster size distributions
+""")
+
+print("\n" + "=" * 80)
+print("ALL ANALYSES COMPLETED SUCCESSFULLY! 🎉")
+print("=" * 80)

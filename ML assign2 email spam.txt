@@ -1,0 +1,103 @@
+# Email Spam Classification using KNN and SVM
+# Simple code for practical exam
+
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+
+# Step 1: Load the dataset
+print("Loading dataset...")
+df = pd.read_csv('emails.csv')
+
+# Step 2: Prepare the data
+print("\nDataset shape:", df.shape)
+print("Column names:", df.columns.tolist())
+
+# Separate features (X) and target (y)
+# Assuming last column is 'Prediction' (0=Not Spam, 1=Spam)
+X = df.iloc[:, 1:-1]  # All columns except first (Email No.) and last (Prediction)
+y = df.iloc[:, -1]     # Last column (Prediction)
+
+print("\nFeatures shape:", X.shape)
+print("Target shape:", y.shape)
+print("Spam emails:", sum(y == 1))
+print("Not Spam emails:", sum(y == 0))
+
+# Step 3: Split data into training and testing sets (80-20 split)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+print("\nTraining set size:", X_train.shape[0])
+print("Testing set size:", X_test.shape[0])
+
+# ==================== K-NEAREST NEIGHBORS (KNN) ====================
+print("\n" + "="*60)
+print("K-NEAREST NEIGHBORS (KNN) CLASSIFIER")
+print("="*60)
+
+# Create and train KNN model (k=5)
+knn = KNeighborsClassifier(n_neighbors=5)
+print("\nTraining KNN model...")
+knn.fit(X_train, y_train)
+
+# Make predictions
+y_pred_knn = knn.predict(X_test)
+
+# Evaluate KNN
+print("\nKNN Results:")
+print("-" * 40)
+accuracy_knn = accuracy_score(y_test, y_pred_knn)
+print(f"Accuracy: {accuracy_knn * 100:.2f}%")
+
+print("\nConfusion Matrix:")
+cm_knn = confusion_matrix(y_test, y_pred_knn)
+print(cm_knn)
+
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred_knn, target_names=['Not Spam', 'Spam']))
+
+# ==================== SUPPORT VECTOR MACHINE (SVM) ====================
+print("\n" + "="*60)
+print("SUPPORT VECTOR MACHINE (SVM) CLASSIFIER")
+print("="*60)
+
+# Create and train SVM model
+svm = SVC(kernel='linear', random_state=42)
+print("\nTraining SVM model...")
+svm.fit(X_train, y_train)
+
+# Make predictions
+y_pred_svm = svm.predict(X_test)
+
+# Evaluate SVM
+print("\nSVM Results:")
+print("-" * 40)
+accuracy_svm = accuracy_score(y_test, y_pred_svm)
+print(f"Accuracy: {accuracy_svm * 100:.2f}%")
+
+print("\nConfusion Matrix:")
+cm_svm = confusion_matrix(y_test, y_pred_svm)
+print(cm_svm)
+
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred_svm, target_names=['Not Spam', 'Spam']))
+
+# ==================== PERFORMANCE COMPARISON ====================
+print("\n" + "="*60)
+print("PERFORMANCE COMPARISON")
+print("="*60)
+print(f"\nKNN Accuracy: {accuracy_knn * 100:.2f}%")
+print(f"SVM Accuracy: {accuracy_svm * 100:.2f}%")
+
+if accuracy_knn > accuracy_svm:
+    print(f"\nKNN performs better by {(accuracy_knn - accuracy_svm) * 100:.2f}%")
+elif accuracy_svm > accuracy_knn:
+    print(f"\nSVM performs better by {(accuracy_svm - accuracy_knn) * 100:.2f}%")
+else:
+    print("\nBoth classifiers have the same accuracy!")
+
+print("\n" + "="*60)
+print("CLASSIFICATION COMPLETE")
+print("="*60)

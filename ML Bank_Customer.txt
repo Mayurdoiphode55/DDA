@@ -1,0 +1,525 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import (accuracy_score, confusion_matrix, classification_report,
+                             roc_auc_score, roc_curve, precision_recall_curve)
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.optimizers import Adam
+import warnings
+warnings.filterwarnings('ignore')
+
+# Set random seeds for reproducibility
+np.random.seed(42)
+tf.random.set_seed(42)
+
+# Set visualization style
+sns.set_style('whitegrid')
+plt.rcParams['figure.figsize'] = (12, 6)
+
+print("=" * 70)
+print("BANK CUSTOMER CHURN PREDICTION - NEURAL NETWORK CLASSIFIER")
+print("=" * 70)
+
+# ============================================================================
+# STEP 1: READ THE DATASET
+# ============================================================================
+print("\n[STEP 1] Loading Dataset...")
+print("=" * 70)
+
+# Load the dataset
+df = pd.read_csv('Churn_Modelling.csv')
+
+print(f"\nDataset Shape: {df.shape}")
+print(f"Number of Samples: {df.shape[0]}")
+print(f"Number of Features: {df.shape[1]}")
+
+print("\nFirst 5 rows:")
+print(df.head())
+
+print("\nDataset Info:")
+print(df.info())
+
+print("\nBasic Statistics:")
+print(df.describe())
+
+print("\nMissing Values:")
+print(df.isnull().sum())
+
+print("\nTarget Variable Distribution:")
+print(df['Exited'].value_counts())
+print(f"\nChurn Rate: {df['Exited'].mean() * 100:.2f}%")
+
+# Visualize target distribution
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+# Count plot
+df['Exited'].value_counts().plot(kind='bar', ax=axes[0], color=['green', 'red'])
+axes[0].set_title('Customer Churn Distribution', fontsize=14, fontweight='bold')
+axes[0].set_xlabel('Exited (0 = Stayed, 1 = Churned)')
+axes[0].set_ylabel('Count')
+axes[0].set_xticklabels(['Stayed', 'Churned'], rotation=0)
+
+# Pie chart
+df['Exited'].value_counts().plot(kind='pie', ax=axes[1], autopct='%1.1f%%',
+                                  labels=['Stayed', 'Churned'],
+                                  colors=['green', 'red'])
+axes[1].set_title('Customer Churn Percentage', fontsize=14, fontweight='bold')
+axes[1].set_ylabel('')
+
+plt.tight_layout()
+plt.savefig('churn_distribution.png', dpi=300, bbox_inches='tight')
+print("\nChurn distribution plot saved as 'churn_distribution.png'")
+
+# ============================================================================
+# STEP 2: FEATURE AND TARGET SEPARATION & TRAIN-TEST SPLIT
+# ============================================================================
+print("\n" + "=" * 70)
+print("[STEP 2] Feature Engineering & Train-Test Split")
+print("=" * 70)
+
+# Drop unnecessary columns
+# RowNumber, CustomerId, and Surname are not useful for prediction
+print("\nDropping unnecessary columns: RowNumber, CustomerId, Surname")
+df_processed = df.drop(['RowNumber', 'CustomerId', 'Surname'], axis=1)
+
+# Encode categorical variables
+print("\nEncoding categorical variables...")
+
+# Label Encoding for binary categorical variable (Gender)
+le_gender = LabelEncoder()
+df_processed['Gender'] = le_gender.fit_transform(df_processed['Gender'])
+print(f"Gender encoding: {dict(zip(le_gender.classes_, le_gender.transform(le_gender.classes_)))}")
+
+# One-Hot Encoding for Geography (nominal categorical variable with >2 categories)
+df_processed = pd.get_dummies(df_processed, columns=['Geography'], drop_first=True)
+
+print("\nFeatures after encoding:")
+print(df_processed.columns.tolist())
+
+# Separate features (X) and target (y)
+X = df_processed.drop('Exited', axis=1)
+y = df_processed['Exited']
+
+print(f"\nFeature set shape: {X.shape}")
+print(f"Target set shape: {y.shape}")
+
+print("\nFeatures used for modeling:")
+for i, col in enumerate(X.columns, 1):
+    print(f"  {i}. {col}")
+
+# Split data into training and testing sets (80-20 split)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+print(f"\nTraining set size: {X_train.shape[0]} samples ({X_train.shape[0]/len(X)*100:.1f}%)")
+print(f"Testing set size: {X_test.shape[0]} samples ({X_test.shape[0]/len(X)*100:.1f}%)")
+print(f"\nTraining set churn rate: {y_train.mean()*100:.2f}%")
+print(f"Testing set churn rate: {y_test.mean()*100:.2f}%")
+
+# ============================================================================
+# STEP 3: NORMALIZE THE DATA
+# ============================================================================
+print("\n" + "=" * 70)
+print("[STEP 3] Data Normalization")
+print("=" * 70)
+
+# Initialize StandardScaler
+scaler = StandardScaler()
+
+# Fit on training data and transform both train and test
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+print("\nStandardization applied using StandardScaler")
+print("Formula: z = (x - mean) / std_dev")
+
+print("\nSample statistics before scaling (Training set):")
+print(f"  Mean: {X_train.mean().mean():.2f}")
+print(f"  Std Dev: {X_train.std().mean():.2f}")
+
+print("\nSample statistics after scaling (Training set):")
+print(f"  Mean: {X_train_scaled.mean():.6f}")
+print(f"  Std Dev: {X_train_scaled.std():.2f}")
+
+# Visualize scaling effect
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Before scaling
+axes[0].hist(X_train['CreditScore'], bins=30, alpha=0.7, color='blue', label='CreditScore')
+axes[0].hist(X_train['Age'], bins=30, alpha=0.7, color='green', label='Age')
+axes[0].hist(X_train['Balance'], bins=30, alpha=0.7, color='red', label='Balance')
+axes[0].set_title('Feature Distribution - Before Scaling', fontsize=12, fontweight='bold')
+axes[0].set_xlabel('Value')
+axes[0].set_ylabel('Frequency')
+axes[0].legend()
+
+# After scaling
+axes[1].hist(X_train_scaled[:, 0], bins=30, alpha=0.7, color='blue', label='CreditScore (scaled)')
+axes[1].hist(X_train_scaled[:, 3], bins=30, alpha=0.7, color='green', label='Age (scaled)')
+axes[1].hist(X_train_scaled[:, 5], bins=30, alpha=0.7, color='red', label='Balance (scaled)')
+axes[1].set_title('Feature Distribution - After Scaling', fontsize=12, fontweight='bold')
+axes[1].set_xlabel('Standardized Value')
+axes[1].set_ylabel('Frequency')
+axes[1].legend()
+
+plt.tight_layout()
+plt.savefig('feature_scaling.png', dpi=300, bbox_inches='tight')
+print("\nFeature scaling visualization saved as 'feature_scaling.png'")
+
+# ============================================================================
+# STEP 4: BUILD AND IMPROVE THE NEURAL NETWORK MODEL
+# ============================================================================
+print("\n" + "=" * 70)
+print("[STEP 4] Building Neural Network Model")
+print("=" * 70)
+
+# MODEL 1: Basic Neural Network
+print("\n--- MODEL 1: Basic Neural Network ---")
+model_basic = Sequential([
+    Dense(64, activation='relu', input_shape=(X_train_scaled.shape[1],)),
+    Dense(32, activation='relu'),
+    Dense(1, activation='sigmoid')
+])
+
+model_basic.compile(
+    optimizer='adam',
+    loss='binary_crossentropy',
+    metrics=['accuracy']
+)
+
+print("\nBasic Model Architecture:")
+model_basic.summary()
+
+# Train basic model
+history_basic = model_basic.fit(
+    X_train_scaled, y_train,
+    validation_split=0.2,
+    epochs=50,
+    batch_size=32,
+    verbose=0
+)
+
+print("\nBasic model trained!")
+
+# MODEL 2: Improved Neural Network with Enhancements
+print("\n" + "=" * 70)
+print("--- MODEL 2: Improved Neural Network ---")
+print("\nImprovements Applied:")
+print("  1. Deeper architecture (more layers)")
+print("  2. Batch Normalization for stable training")
+print("  3. Dropout layers to prevent overfitting")
+print("  4. Early Stopping to avoid overtraining")
+print("  5. Learning Rate Reduction on plateau")
+print("  6. Optimized batch size and learning rate")
+
+model_improved = Sequential([
+    # Input layer with batch normalization
+    Dense(128, activation='relu', input_shape=(X_train_scaled.shape[1],)),
+    BatchNormalization(),
+    Dropout(0.3),
+    
+    # Hidden layer 1
+    Dense(64, activation='relu'),
+    BatchNormalization(),
+    Dropout(0.3),
+    
+    # Hidden layer 2
+    Dense(32, activation='relu'),
+    BatchNormalization(),
+    Dropout(0.2),
+    
+    # Hidden layer 3
+    Dense(16, activation='relu'),
+    
+    # Output layer
+    Dense(1, activation='sigmoid')
+])
+
+# Compile with optimized learning rate
+optimizer = Adam(learning_rate=0.001)
+model_improved.compile(
+    optimizer=optimizer,
+    loss='binary_crossentropy',
+    metrics=['accuracy', tf.keras.metrics.AUC(name='auc')]
+)
+
+print("\nImproved Model Architecture:")
+model_improved.summary()
+
+# Callbacks for training optimization
+early_stopping = EarlyStopping(
+    monitor='val_loss',
+    patience=15,
+    restore_best_weights=True,
+    verbose=1
+)
+
+reduce_lr = ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.5,
+    patience=5,
+    min_lr=1e-7,
+    verbose=1
+)
+
+print("\nTraining improved model...")
+history_improved = model_improved.fit(
+    X_train_scaled, y_train,
+    validation_split=0.2,
+    epochs=100,
+    batch_size=32,
+    callbacks=[early_stopping, reduce_lr],
+    verbose=0
+)
+
+print("\nImproved model trained successfully!")
+
+# Plot training history comparison
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+# Basic model - Accuracy
+axes[0, 0].plot(history_basic.history['accuracy'], label='Train', linewidth=2)
+axes[0, 0].plot(history_basic.history['val_accuracy'], label='Validation', linewidth=2)
+axes[0, 0].set_title('Basic Model - Accuracy', fontsize=12, fontweight='bold')
+axes[0, 0].set_xlabel('Epoch')
+axes[0, 0].set_ylabel('Accuracy')
+axes[0, 0].legend()
+axes[0, 0].grid(alpha=0.3)
+
+# Basic model - Loss
+axes[0, 1].plot(history_basic.history['loss'], label='Train', linewidth=2)
+axes[0, 1].plot(history_basic.history['val_loss'], label='Validation', linewidth=2)
+axes[0, 1].set_title('Basic Model - Loss', fontsize=12, fontweight='bold')
+axes[0, 1].set_xlabel('Epoch')
+axes[0, 1].set_ylabel('Loss')
+axes[0, 1].legend()
+axes[0, 1].grid(alpha=0.3)
+
+# Improved model - Accuracy
+axes[1, 0].plot(history_improved.history['accuracy'], label='Train', linewidth=2)
+axes[1, 0].plot(history_improved.history['val_accuracy'], label='Validation', linewidth=2)
+axes[1, 0].set_title('Improved Model - Accuracy', fontsize=12, fontweight='bold')
+axes[1, 0].set_xlabel('Epoch')
+axes[1, 0].set_ylabel('Accuracy')
+axes[1, 0].legend()
+axes[1, 0].grid(alpha=0.3)
+
+# Improved model - Loss
+axes[1, 1].plot(history_improved.history['loss'], label='Train', linewidth=2)
+axes[1, 1].plot(history_improved.history['val_loss'], label='Validation', linewidth=2)
+axes[1, 1].set_title('Improved Model - Loss', fontsize=12, fontweight='bold')
+axes[1, 1].set_xlabel('Epoch')
+axes[1, 1].set_ylabel('Loss')
+axes[1, 1].legend()
+axes[1, 1].grid(alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('training_history.png', dpi=300, bbox_inches='tight')
+print("\nTraining history plot saved as 'training_history.png'")
+
+# ============================================================================
+# STEP 5: ACCURACY SCORE AND CONFUSION MATRIX
+# ============================================================================
+print("\n" + "=" * 70)
+print("[STEP 5] Model Evaluation - Accuracy & Confusion Matrix")
+print("=" * 70)
+
+# Predictions
+y_pred_basic_prob = model_basic.predict(X_test_scaled, verbose=0)
+y_pred_basic = (y_pred_basic_prob > 0.5).astype(int).flatten()
+
+y_pred_improved_prob = model_improved.predict(X_test_scaled, verbose=0)
+y_pred_improved = (y_pred_improved_prob > 0.5).astype(int).flatten()
+
+# Calculate metrics for both models
+print("\n" + "=" * 70)
+print("MODEL COMPARISON")
+print("=" * 70)
+
+# Basic Model Metrics
+print("\n--- BASIC MODEL PERFORMANCE ---")
+acc_basic = accuracy_score(y_test, y_pred_basic)
+auc_basic = roc_auc_score(y_test, y_pred_basic_prob)
+
+print(f"\nAccuracy Score: {acc_basic:.4f} ({acc_basic*100:.2f}%)")
+print(f"AUC-ROC Score: {auc_basic:.4f}")
+
+print("\nConfusion Matrix:")
+cm_basic = confusion_matrix(y_test, y_pred_basic)
+print(cm_basic)
+
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred_basic, 
+                          target_names=['Stayed', 'Churned']))
+
+# Improved Model Metrics
+print("\n" + "=" * 70)
+print("--- IMPROVED MODEL PERFORMANCE ---")
+acc_improved = accuracy_score(y_test, y_pred_improved)
+auc_improved = roc_auc_score(y_test, y_pred_improved_prob)
+
+print(f"\nAccuracy Score: {acc_improved:.4f} ({acc_improved*100:.2f}%)")
+print(f"AUC-ROC Score: {auc_improved:.4f}")
+
+print("\nConfusion Matrix:")
+cm_improved = confusion_matrix(y_test, y_pred_improved)
+print(cm_improved)
+
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred_improved,
+                          target_names=['Stayed', 'Churned']))
+
+# Visualize Confusion Matrices
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Basic Model Confusion Matrix
+sns.heatmap(cm_basic, annot=True, fmt='d', cmap='Blues', ax=axes[0],
+            xticklabels=['Stayed', 'Churned'],
+            yticklabels=['Stayed', 'Churned'])
+axes[0].set_title(f'Basic Model - Confusion Matrix\nAccuracy: {acc_basic:.4f}',
+                 fontsize=12, fontweight='bold')
+axes[0].set_ylabel('Actual')
+axes[0].set_xlabel('Predicted')
+
+# Improved Model Confusion Matrix
+sns.heatmap(cm_improved, annot=True, fmt='d', cmap='Greens', ax=axes[1],
+            xticklabels=['Stayed', 'Churned'],
+            yticklabels=['Stayed', 'Churned'])
+axes[1].set_title(f'Improved Model - Confusion Matrix\nAccuracy: {acc_improved:.4f}',
+                 fontsize=12, fontweight='bold')
+axes[1].set_ylabel('Actual')
+axes[1].set_xlabel('Predicted')
+
+plt.tight_layout()
+plt.savefig('confusion_matrices.png', dpi=300, bbox_inches='tight')
+print("\nConfusion matrices plot saved as 'confusion_matrices.png'")
+
+# ROC Curves
+fig, ax = plt.subplots(figsize=(10, 7))
+
+# Basic Model ROC
+fpr_basic, tpr_basic, _ = roc_curve(y_test, y_pred_basic_prob)
+ax.plot(fpr_basic, tpr_basic, linewidth=2, 
+        label=f'Basic Model (AUC = {auc_basic:.4f})')
+
+# Improved Model ROC
+fpr_improved, tpr_improved, _ = roc_curve(y_test, y_pred_improved_prob)
+ax.plot(fpr_improved, tpr_improved, linewidth=2,
+        label=f'Improved Model (AUC = {auc_improved:.4f})')
+
+# Random classifier line
+ax.plot([0, 1], [0, 1], 'k--', linewidth=2, label='Random Classifier')
+
+ax.set_xlabel('False Positive Rate', fontsize=12)
+ax.set_ylabel('True Positive Rate', fontsize=12)
+ax.set_title('ROC Curve Comparison', fontsize=14, fontweight='bold')
+ax.legend(fontsize=10)
+ax.grid(alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('roc_curves.png', dpi=300, bbox_inches='tight')
+print("ROC curves plot saved as 'roc_curves.png'")
+
+# Performance Summary
+print("\n" + "=" * 70)
+print("PERFORMANCE SUMMARY")
+print("=" * 70)
+
+summary_df = pd.DataFrame({
+    'Model': ['Basic NN', 'Improved NN'],
+    'Accuracy': [acc_basic, acc_improved],
+    'AUC-ROC': [auc_basic, auc_improved],
+    'Improvement': ['-', f'+{(acc_improved - acc_basic)*100:.2f}%']
+})
+
+print("\n" + summary_df.to_string(index=False))
+
+# Calculate additional metrics from confusion matrix
+tn_i, fp_i, fn_i, tp_i = cm_improved.ravel()
+precision_i = tp_i / (tp_i + fp_i)
+recall_i = tp_i / (tp_i + fn_i)
+f1_i = 2 * (precision_i * recall_i) / (precision_i + recall_i)
+
+print(f"\n--- IMPROVED MODEL - DETAILED METRICS ---")
+print(f"True Positives: {tp_i}")
+print(f"True Negatives: {tn_i}")
+print(f"False Positives: {fp_i}")
+print(f"False Negatives: {fn_i}")
+print(f"\nPrecision: {precision_i:.4f}")
+print(f"Recall (Sensitivity): {recall_i:.4f}")
+print(f"F1-Score: {f1_i:.4f}")
+print(f"Specificity: {tn_i/(tn_i + fp_i):.4f}")
+
+# Feature Importance Analysis (using permutation importance approximation)
+print("\n" + "=" * 70)
+print("FEATURE IMPORTANCE ANALYSIS")
+print("=" * 70)
+
+# Get baseline performance
+baseline_score = model_improved.evaluate(X_test_scaled, y_test, verbose=0)[1]
+
+# Calculate importance by shuffling each feature
+feature_importance = []
+for i, col in enumerate(X.columns):
+    X_test_permuted = X_test_scaled.copy()
+    np.random.shuffle(X_test_permuted[:, i])
+    permuted_score = model_improved.evaluate(X_test_permuted, y_test, verbose=0)[1]
+    importance = baseline_score - permuted_score
+    feature_importance.append((col, importance))
+
+# Sort by importance
+feature_importance.sort(key=lambda x: x[1], reverse=True)
+
+print("\nTop 5 Most Important Features:")
+for i, (feature, importance) in enumerate(feature_importance[:5], 1):
+    print(f"{i}. {feature}: {importance:.4f}")
+
+# Visualize feature importance
+features, importances = zip(*feature_importance[:8])
+plt.figure(figsize=(10, 6))
+plt.barh(range(len(features)), importances, color='steelblue')
+plt.yticks(range(len(features)), features)
+plt.xlabel('Importance Score', fontsize=12)
+plt.title('Top 8 Feature Importances', fontsize=14, fontweight='bold')
+plt.gca().invert_yaxis()
+plt.grid(axis='x', alpha=0.3)
+plt.tight_layout()
+plt.savefig('feature_importance.png', dpi=300, bbox_inches='tight')
+print("\nFeature importance plot saved as 'feature_importance.png'")
+
+# ============================================================================
+# CONCLUSION
+# ============================================================================
+print("\n" + "=" * 70)
+print("CONCLUSION")
+print("=" * 70)
+
+print(f"""
+✅ The Improved Neural Network model successfully predicts customer churn
+   with an accuracy of {acc_improved*100:.2f}% and AUC-ROC of {auc_improved:.4f}.
+
+📊 Key Findings:
+   • The improved model shows {(acc_improved - acc_basic)*100:.2f}% better accuracy than the basic model
+   • Most important features: {', '.join([f[0] for f in feature_importance[:3]])}
+   • The model can identify {recall_i*100:.1f}% of customers who will churn
+   • {precision_i*100:.1f}% of predicted churners actually churn
+
+💡 Business Impact:
+   • Banks can proactively target at-risk customers
+   • Reduce customer acquisition costs by improving retention
+   • Implement personalized retention strategies
+
+🎯 All evaluation metrics, confusion matrices, and visualizations have been saved!
+""")
+
+print("=" * 70)
+print("ANALYSIS COMPLETE!")
+print("=" * 70)

@@ -1,0 +1,17 @@
+def f(x):
+    return (x+3)**2
+def df(x):
+    return 2*(x+3)
+
+x = float(input("enter the value of x:"))
+alpha = float(input("enter the limiter:"))
+iterations = int(input("enter the number of iterations:"))
+
+for i in range(iterations):
+    grad = df(x)
+    x = x - alpha*grad
+    print(f"iterations {x+1}: x = {x:.6f}, f(x)={f(x):.6f}")
+
+print(f"local minima occurs at x = {x:.6f}, f(x)={f(x):.6f}")
+
+
