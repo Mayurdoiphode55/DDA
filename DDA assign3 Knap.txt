@@ -1,0 +1,47 @@
+#include <iostream>
+#include <vector>
+#include <algorithm>
+using namespace std;
+
+int knapsack(int n, vector<int>wt, vector<int>val, int W)
+{
+    vector<vector<int>>dp(n+1, vector<int>(W+1, 0));
+    
+    for(int i=1; i<=n; i++)
+    {
+        for(int w=1; w<=W; w++){
+            if(wt[i-1] <=w)
+            dp[i][w] = max(val[i-1] + dp[i-1][w-wt[i-1]], dp[i-1][w]);
+            else{
+                dp[i][w] = dp[i-1][w];
+            }
+        }
+    }
+    return dp[n][W];
+}
+
+int main()
+{
+    int n, W;
+    cout<<"enter the number of items: ";
+    cin>>
+    vector<int>val(n), wt(n);
+    
+    cout<<"enter the values of each items: ";
+    for(int i=0; i<n; i++)
+    {
+        cin>>val[i];
+    }
+    cout<<"enter the weigth of each items: ";
+    for(int i=0; i<n; i++)
+    {
+        cin>>wt[i];
+    }
+    
+    cout<<"enter the capacity of knapsack: ";
+    cin>>W;
+    
+    cout<<"maxmimu value of that can be obtained: "<<knapsack(n, wt,val,W)<<endl;
+    return 0;
+    
+}

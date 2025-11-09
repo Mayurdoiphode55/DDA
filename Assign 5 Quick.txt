@@ -1,0 +1,94 @@
+#include <iostream>
+#include <cstdlib>
+#include <ctime>
+#include <chrono>
+using namespace std;
+using namespace std::chrono;
+
+// Deterministic partition using last element as pivot
+int partitionDeterministic(int arr[], int low, int high) {
+    int pivot = arr[high];
+    int i = low - 1;
+    for (int j = low; j < high; j++) {
+        if (arr[j] <= pivot) {
+            i++;
+            swap(arr[i], arr[j]);
+        }
+    }
+    swap(arr[i + 1], arr[high]);
+    return (i + 1);
+}
+
+// Randomized partition (random pivot)
+int partitionRandomized(int arr[], int low, int high) {
+    int randomPivot = low + rand() % (high - low + 1);
+    swap(arr[randomPivot], arr[high]);
+    return partitionDeterministic(arr, low, high);
+}
+
+// Deterministic QuickSort
+void quickSortDeterministic(int arr[], int low, int high) {
+    if (low < high) {
+        int pi = partitionDeterministic(arr, low, high);
+        quickSortDeterministic(arr, low, pi - 1);
+        quickSortDeterministic(arr, pi + 1, high);
+    }
+}
+
+// Randomized QuickSort
+void quickSortRandomized(int arr[], int low, int high) {
+    if (low < high) {
+        int pi = partitionRandomized(arr, low, high);
+        quickSortRandomized(arr, low, pi - 1);
+        quickSortRandomized(arr, pi + 1, high);
+    }
+}
+
+// Function to print array
+void printArray(int arr[], int n) {
+    for (int i = 0; i < n; i++)
+        cout << arr[i] << " ";
+    cout << endl;
+}
+
+int main() {
+    srand(time(0));
+
+    int n;
+    cout << "Enter number of elements: ";
+    cin >> n;
+
+    int *arr1 = new int[n];
+    int *arr2 = new int[n];
+
+    cout << "Enter elements: ";
+    for (int i = 0; i < n; i++) {
+        cin >> arr1[i];
+        arr2[i] = arr1[i]; // copy array for comparison
+    }
+
+    // Deterministic QuickSort timing
+    auto start1 = high_resolution_clock::now();
+    quickSortDeterministic(arr1, 0, n - 1);
+    auto end1 = high_resolution_clock::now();
+    auto duration1 = duration_cast<microseconds>(end1 - start1);
+
+    // Randomized QuickSort timing
+    auto start2 = high_resolution_clock::now();
+    quickSortRandomized(arr2, 0, n - 1);
+    auto end2 = high_resolution_clock::now();
+    auto duration2 = duration_cast<microseconds>(end2 - start2);
+
+    cout << "\nSorted Array (Deterministic): ";
+    printArray(arr1, n);
+    cout << "Time taken by Deterministic QuickSort: " << duration1.count() << " microseconds" << endl;
+
+    cout << "\nSorted Array (Randomized): ";
+    printArray(arr2, n);
+    cout << "Time taken by Randomized QuickSort: " << duration2.count() << " microseconds" << endl;
+
+    delete[] arr1;
+    delete[] arr2;
+
+    return 0;
+}
